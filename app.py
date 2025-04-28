@@ -1,3 +1,4 @@
+import bcrypt
 from flask import Flask, request, jsonify
 from database import db 
 from models.user import User  
@@ -5,7 +6,7 @@ from flask_login import LoginManager, login_user, current_user, logout_user, log
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "your_secret_key"  # Obrigatório para funcionamento de sessões e autenticação
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db' 
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:admin123@127.0.0.1:3306/flask-crud'
 
 login_maneger = LoginManager()  # Cria o gerenciador de login
 db.init_app(app)  # Inicializa a conexão do banco com o app
@@ -27,7 +28,8 @@ def login():
 
     if username and password:
         user = User.query.filter_by(username=username).first()  # Busca o usuário no banco
-        if user and user.password == password:  
+
+        if user and bcrypt.checkpw(str.encode(password), str.encode(user.password)):  
             login_user(user)  # Efetua o login (salva na sessão)
             print(current_user.is_authenticated) 
             return jsonify({"message": "Credencial validada com sucesso!"})
@@ -40,7 +42,6 @@ def logout():
     logout_user()# limpa a sessão e desloga o usuário
     return jsonify({"message": "Logout realizado com sucesso!"})
 
-
 @app.route("/user", methods=["POST"])
 #@login_required -> Somente um usuário autenticado no sistema (já cadastrado), pode criar novo usuário
 def create_user():
@@ -50,7 +51,8 @@ def create_user():
     password = data.get("password")
 
     if username and password:
-        user = User(username=username, password=password)
+        hashed_password = bcrypt.hashpw(str.encode(password), bcrypt.gensalt())
+        user = User(username=username, password=hashed_password, role='user')
         db.session.add(user)
         db.session.commit()
         return jsonify({"message": "Usuário cadastrado com sucesso!"})
@@ -72,6 +74,11 @@ def update_user(id_user):
     data = request.json
     user = User.query.get(id_user)
 
+  #Gerenciamento de perfil -> somente atualiza quando id e user = admin
+
+    if id_user != current_user.id and current_user.role == "user":
+        return jsonify({"ERROR": "Operação não permitida!"}), 403
+
     if user and data.get("password"): 
         user.password = data.get("password")
         db.session.commit()
@@ -84,6 +91,10 @@ def update_user(id_user):
 @login_required
 def read_delete_user(id_user):
     user = User.query.get(id_user)
+
+    #Gerenciamento de perfil -> somente deleta quando user = admin
+    if current_user.role != "admin":
+       return jsonify({"ERROR": "Operação não permitida!"}), 403 
 
     if id_user == current_user.id:
         return jsonify({"message": f"Deleção não permitida!!!"}), 403
